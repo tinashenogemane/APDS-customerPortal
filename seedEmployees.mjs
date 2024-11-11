@@ -22,7 +22,7 @@ async function seedEmployees() {
                 username: employee.username,
                 password: hashedPassword,
             };
-        }));
+        })); 
 
         // Insert into the employees collection
         const collection = await db.collection("employees");

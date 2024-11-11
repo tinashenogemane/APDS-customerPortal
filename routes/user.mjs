@@ -54,7 +54,7 @@ router.post("/signup", async (req, res) => {
             password: hashedPassword,
         };
 
-        // Insert into database
+        //database
         let collection = await db.collection("customers");
         await collection.insertOne(newCustomer);
 
@@ -67,6 +67,8 @@ router.post("/signup", async (req, res) => {
 
 // Customer Login
 router.post("/login", bruteforce.prevent, async (req, res) => {
+    console.log("Login request received:", req.body); // Log incoming request data
+
     const { username, accountNumber, password } = req.body;
 
     try {
@@ -74,34 +76,40 @@ router.post("/login", bruteforce.prevent, async (req, res) => {
         if (!validateInput(username, regexPatterns.fullName) ||
             !validateInput(accountNumber, regexPatterns.accountNumber) ||
             !validateInput(password, regexPatterns.password)) {
+            console.log("Invalid input format"); // Log validation failure
             return res.status(400).json({ message: "Invalid input format" });
         }
 
-        // Find the customer by username and account number
+        // Find the customer by username and account number (case-insensitive)
         const collection = await db.collection("customers");
-        const customer = await collection.findOne({ fullName: username, accountNumber });
+        const customer = await collection.findOne({ 
+            fullName: new RegExp(`^${username}$`, 'i'), 
+            accountNumber 
+        });
 
-        // If the customer does not exist
         if (!customer) {
+            console.log("User not found or account number is incorrect"); // Log user not found
             return res.status(401).json({ message: "User not found or account number is incorrect" });
         }
 
         // Compare the passwords
         const passwordMatch = await bcrypt.compare(password, customer.password);
         if (!passwordMatch) {
+            console.log("Incorrect password"); // Log incorrect password
             return res.status(401).json({ message: "Incorrect password" });
         }
 
         // Generate a JWT token
         const token = jwt.sign(
-            { username, accountNumber },
+            { username: customer.fullName, accountNumber },
             JWT_SECRET,
             { expiresIn: "1h" }
         );
 
+        console.log("Login successful, token generated"); // Log successful login
         res.status(200).json({ message: "Login successful", token });
     } catch (error) {
-        console.error("Login error:", error);
+        console.error("Login error:", error); // Log server error
         res.status(500).json({ message: "Login failed due to server error" });
     }
 });
@@ -109,104 +117,112 @@ router.post("/login", bruteforce.prevent, async (req, res) => {
 // Employee Login
 router.post("/employee/login", bruteforce.prevent, async (req, res) => {
     const { username, password } = req.body;
+    console.log("Received login request for employee:", username); // Log the incoming request
 
     try {
         // Validate inputs
         if (!validateInput(username, regexPatterns.fullName) ||
             !validateInput(password, regexPatterns.password)) {
+            console.log("Invalid input format for username or password"); // Log validation failure
             return res.status(400).json({ message: "Invalid input format" });
         }
 
-        // Find the employee in the database
+        // Find the employee in the database (case-insensitive)
         const collection = await db.collection("employees");
-        const employee = await collection.findOne({ username });
+        const employee = await collection.findOne({ username: new RegExp(`^${username}$`, 'i') });
+        console.log("Employee found:", employee); // Log the employee data
 
         // If the employee does not exist
         if (!employee) {
+            console.log("Employee not found"); // Log employee not found
             return res.status(401).json({ message: "Employee not found" });
         }
 
         // Compare passwords
         const passwordMatch = await bcrypt.compare(password, employee.password);
+        console.log("Password match:", passwordMatch); // Log password comparison result
         if (!passwordMatch) {
+            console.log("Incorrect password"); // Log incorrect password
             return res.status(401).json({ message: "Incorrect password" });
         }
 
         // Generate JWT for the employee
         const token = jwt.sign(
-            { username, role: "employee" },
+            { username: employee.username, role: "employee" },
             JWT_SECRET,
             { expiresIn: "1h" }
         );
 
+        console.log("Employee login successful, token generated"); // Log successful login
         res.status(200).json({ message: "Employee login successful", token });
     } catch (error) {
-        console.error("Employee login error:", error);
+        console.error("Employee login error:", error); // Log server error
         res.status(500).json({ message: "Login failed due to server error" });
     }
 });
 
 // Customer Payment Creation
 router.post("/payment", async (req, res) => {
-    const { amount, currency, provider, payeeAccount, swiftCode, token } = req.body;
+    const { customer, amount, currency, provider, payeeAccount, swiftCode, token } = req.body;
+    console.log("Received payment request:", req.body); // Log incoming request data
+
+    // Validate required fields
+    if (!customer || !amount || !currency || !provider || !payeeAccount || !payeeAccount.recipientName || !payeeAccount.recipientAccountNumber || !swiftCode) {
+        return res.status(400).json({ message: "Invalid payment data" });
+    }
+
+    // Simulate user validation (replace with actual validation logic)
+    const isValidUser = validateUserSession(customer, token); // Implement this function to check user session
+    if (!isValidUser) {
+        return res.status(401).json({ message: "Unauthorized user" });
+    }
 
     try {
-        // Validate inputs
-        if (!validateInput(amount, regexPatterns.amount) ||
-            !validateInput(currency, regexPatterns.currency) ||
-            !validateInput(swiftCode, regexPatterns.swiftCode) ||
-            !payeeAccount || 
-            !validateInput(payeeAccount.recipientName, regexPatterns.fullName) ||
-            !validateInput(payeeAccount.recipientAccountNumber, regexPatterns.accountNumber)) {
-            return res.status(400).json({ message: "Invalid input format" });
-        }
-
-        // Verify JWT
-        const decoded = jwt.verify(token, JWT_SECRET);
-        if (!decoded) {
-            return res.status(401).json({ message: "Unauthorized" });
-        }
-
-        // Create a payment document
-        let newPayment = {
-            customer: decoded.username,
-            accountNumber: decoded.accountNumber,
+        // Insert payment into the database
+        const collection = await db.collection("payments");
+        const payment = {
+            customer,
             amount,
             currency,
             provider,
-            payeeAccount: {
-                recipientName: payeeAccount.recipientName,  // Extract recipient name
-                recipientAccountNumber: payeeAccount.recipientAccountNumber,  // Extract recipient account number
-            },
+            payeeAccount,
             swiftCode,
-            status: "Pending"
+            status: "Pending",
+            createdAt: new Date()
         };
+        const result = await collection.insertOne(payment);
+        console.log("Payment inserted:", result.insertedId); // Log the inserted payment ID
 
-        // Insert the payment into the database
-        let collection = await db.collection("payments");
-        await collection.insertOne(newPayment);
-
-        res.status(201).json({ message: "Payment created successfully", payment: newPayment });
+        res.status(200).json({ message: "Payment created successfully" });
     } catch (error) {
-        console.error("Payment creation error:", error);
-        res.status(500).json({ message: "Payment creation failed" });
+        console.error("Error inserting payment:", error); // Log any errors during insertion
+        res.status(500).json({ message: "Failed to create payment." });
     }
 });
 
+// Example function to validate user session
+function validateUserSession(username, token) {
+    // Implement actual logic to validate the user session
+    // For example, check if the token is valid for the given username
+    return true; // Placeholder: replace with actual validation
+}
 
 // Employee Payment Verification
 router.post("/payment/verify", async (req, res) => {
     const { paymentId, swiftCode, token } = req.body;
+    console.log("Received verification request:", req.body); // Log incoming request data
 
     try {
         // Validate inputs
         if (!validateInput(swiftCode, regexPatterns.swiftCode)) {
+            console.log("Invalid SWIFT code format"); // Log validation failure
             return res.status(400).json({ message: "Invalid SWIFT code format" });
         }
 
         // Verify JWT
         const decoded = jwt.verify(token, JWT_SECRET);
         if (!decoded || decoded.role !== "employee") {
+            console.log("Unauthorized access attempt"); // Log unauthorized access
             return res.status(401).json({ message: "Unauthorized" });
         }
 
@@ -215,21 +231,46 @@ router.post("/payment/verify", async (req, res) => {
         const payment = await collection.findOne({ _id: new ObjectId(paymentId) });
 
         if (!payment) {
+            console.log("Payment not found"); // Log payment not found
             return res.status(404).json({ message: "Payment not found" });
         }
 
         // Verify SWIFT code
         if (payment.swiftCode !== swiftCode) {
+            console.log("SWIFT code mismatch"); // Log SWIFT code mismatch
             return res.status(400).json({ message: "SWIFT code mismatch" });
         }
 
         // Mark the payment as verified
         await collection.updateOne({ _id: new ObjectId(paymentId) }, { $set: { status: "Verified" } });
 
+        console.log("Payment verified successfully"); // Log successful verification
         res.status(200).json({ message: "Payment verified successfully" });
     } catch (error) {
-        console.error("Payment verification error:", error);
+        console.error("Payment verification error:", error); // Log server error
         res.status(500).json({ message: "Payment verification failed" });
+    }
+});
+
+router.get("/payment/verify", async (req, res) => {
+    try {
+        const token = req.headers.authorization.split(' ')[1];
+        const decoded = jwt.verify(token, JWT_SECRET);
+        console.log("Decoded token:", decoded); // Log decoded token
+
+        if (!decoded || decoded.role !== "employee") {
+            console.log("Unauthorized access attempt"); // Log unauthorized access
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+
+        const collection = await db.collection("payments");
+        const payments = await collection.find({ status: "Pending" }).toArray();
+        console.log("Pending payments found:", payments); // Log pending payments
+
+        res.status(200).json({ payments });
+    } catch (error) {
+        console.error("Error fetching payments:", error); // Log server error
+        res.status(500).json({ message: "Failed to fetch payments." });
     }
 });
 

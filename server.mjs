@@ -19,8 +19,12 @@ const options = {
 // Use Helmet for security headers
 app.use(helmet());
 
-// Use CORS
-app.use(cors());
+// Use CORS with specific origin
+app.use(cors({
+    origin: 'http://localhost:3001', // Ensure this matches your frontend's URL
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    credentials: true
+}));
 app.use(express.json());
 
 // Sanitize user input
@@ -59,8 +63,19 @@ app.use((req, res, next) => {
 // User routes
 app.use("/user", users);
 
+// Enable pre-flight across-the-board
+app.options('*', cors());
+
 // Create the HTTPS server
 let server = https.createServer(options, app);
 server.listen(PORT, () => {
-    console.log(`Secure server running on port ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
+});
+
+// Redirect HTTP to HTTPS
+app.use((req, res, next) => {
+    if (!req.secure) {
+        return res.redirect('https://' + req.headers.host + req.url);
+    }
+    next();
 });
